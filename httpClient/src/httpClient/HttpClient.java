@@ -49,7 +49,9 @@ public class HttpClient {
 	
 	  private List<String> cookies;
 	  
-	  Hashtable <String, Integer> tags = null;
+	  private Hashtable <String, Integer> tags = null;
+	  
+	  private H2server server = null;
 	  
 	 
 	  private final String USER_AGENT = "Mozilla/5.0";
@@ -61,20 +63,24 @@ public class HttpClient {
 		  
 		  
 		  HttpClient http = new HttpClient();
+		  http.server = http.new H2server();
+		  http.server.connect("~/test");
+		  http.server.dropAll();
+		  http.server.init();
 		  
-		  
-		  
+		  /*
 		  H2server server = http.new H2server();
 		  server.connect("~/test");
 		  
+		  server.dropAll();
 		  server.init();
 		  server.clearAllData();
 		  
-		  server.addEntry(entryType.TAG, 1, "tagname", false);
+		  server.addEntry(entryType.TAG,  "tagname", false);
 		  server.addEntry(entryType.AUTHER, 2, "authername");
 		  server.addEntry(entryType.IMAGE, 3, "imagename", -1, "location", 2);
-		  server.addEntry(entryType.IMAGETAG, 3, 1);
-		  //server.printAll();
+		  server.addEntry(entryType.IMAGETAG, 3, "tagname");
+		  server.printAll();
 		  
 		  System.out.println( server.ifExistbyName(entryType.AUTHER, "authername"));
 		  System.out.println( server.ifExistbyName(entryType.IMAGE, "imagename"));
@@ -83,11 +89,17 @@ public class HttpClient {
 		  System.out.println( server.ifExistbyID(entryType.AUTHER, 2));
 		  System.out.println( server.ifExistbyID(entryType.IMAGE, 3));
 		  System.out.println( server.ifExistbyID(entryType.TAG, 1));
-		  System.out.println( server.ifExistbyID(entryType.IMAGETAG, 1, 1));
+		  System.out.println( server.ifExistbyID(entryType.IMAGETAG, 3, "tagname"));
+		  
+		  
 		  
 		  
 		  server.disconnect();
-		  /*
+		  */
+		  
+		  
+		  
+		  
 		  http. logon();
 		  
 		  int unTagged = http.procBookmark();
@@ -95,8 +107,8 @@ public class HttpClient {
 		  System.out.println("untagged bookmarks is "+unTagged);
 		  
 		  http.procTag(unTagged);
-		  */
 		  
+		  http.server.disconnect();
 		
 	  }
 	  
@@ -104,9 +116,10 @@ public class HttpClient {
 	   * Input: jsoup doc
 	   * Compare the recommended tags and the saved tags
 	   * Return a list of tag that should be add to the image
+	 * @throws Exception 
 	   ***********************/
 	  
-	  private List<String> prepareTag(Document doc)
+	  private List<String> prepareTag(Document doc) throws Exception
 	  {
 		
 		  if (this.tags == null)
@@ -127,6 +140,14 @@ public class HttpClient {
 				  
 				  ret.add(tagName);
 				  this.tags.put(tagName, this.tags.get(tagName)-1);
+				  
+				  
+			  }
+			  
+			  if (!this.server.ifExistbyName(entryType.TAG, tagName))
+			  {
+				  System.out.println("tag " + tagName + "not exist in database, adding...");
+				  this.server.addEntry(entryType.TAG, tagName, false );
 				  
 				  
 			  }
@@ -197,6 +218,50 @@ public class HttpClient {
 			}
 			return result.toString();
 	  }
+	  /*********
+	   * analyze the doc and add the auther if not exist
+	   * @param doc
+	 * @throws Exception 
+	   */
+	  private void addAuthor(String id) throws Exception
+	  {
+		  String link = "http://www.pixiv.net/member_illust.php?mode=medium&illust_id=" + id;
+		  String html = this.GetPageContent(link);
+		  
+		  Document doc = Jsoup.parse(html, "UTF-8");
+		  //System.out.println(html);
+		  
+		  Elements authorDetails = doc.select("div._unit.profile-unit");
+		  
+		  Elements authorlinkt1 = authorDetails.select("a[href]");
+		  Element temp2 = authorlinkt1.first();
+		  String authorLink = temp2.attr("href");
+		  Elements authorN = authorDetails.select("h1.user");
+		  String autherName = authorN.text();
+		  System.out.println(autherName);
+		  
+		  Pattern intsOnly = Pattern.compile("\\d+");
+		  Matcher makeMatch = intsOnly.matcher(authorLink);
+		  makeMatch.find();
+		  String ID = makeMatch.group();
+		  System.out.println(ID);
+		  
+		  if (!this.server.ifExistbyID(entryType.AUTHER, ID))
+		  {
+			  this.server.addEntry(entryType.AUTHER, ID, autherName);
+			  
+		  }
+		  else if (!this.server.ifExistbyID(entryType.AUTHER, ID, autherName))
+		  {
+			  
+			  //TODO
+			  System.out.println("author name change, need to implement update function");
+			  
+		  }
+		  
+		  
+		  
+	  }
 	  
 	  /*************************
 	   * the main function that process the images
@@ -238,6 +303,16 @@ public class HttpClient {
 				  
 				  Document docF = Jsoup.parse(html, "UTF-8");
 				  
+				  Pattern intsOnly = Pattern.compile("\\d+");
+				  Matcher makeMatch = intsOnly.matcher(relHref);
+				  makeMatch.find();
+				  String ID = makeMatch.group();
+				  System.out.println(ID);
+				  
+				  addAuthor(ID);
+				  
+				  
+				  
 				  List<String> curTags = this.prepareTag(docF);
 				  
 				  if(curTags.isEmpty())
@@ -245,11 +320,7 @@ public class HttpClient {
 				  
 				  String curForm = this.prepareForm(docF, curTags);
 				  
-				  Pattern intsOnly = Pattern.compile("\\d+");
-				  Matcher makeMatch = intsOnly.matcher(relHref);
-				  makeMatch.find();
-				  String ID = makeMatch.group();
-				  System.out.println(ID);
+				  
 				  
 				  
 				  String addBookmark = "http://www.pixiv.net/bookmark_add.php?id=" + ID;
@@ -293,9 +364,16 @@ public class HttpClient {
 			  
 			  
 			  tagName[1] = tagName[1].split(Pattern.quote(")"))[0];
-			  if (!(tagName[0].equals("¤¹¤Ù¤Æ") || tagName.equals("Î´·Öî")))
+			  if (!(tagName[0].equals("¤¹¤Ù¤Æ") || tagName[0].equals("Î´·Öî")))
 			  {
 				  this.tags.put(tagName[0], Integer.parseInt(tagName[1]));			  
+				  if (!this.server.ifExistbyName(entryType.TAG, tagName[0]))
+				  {
+					  System.out.println("tag " + tagName[0] + "not exist in database, adding...");
+					  this.server.addEntry(entryType.TAG, tagName[0], true );
+					  
+					  
+				  }
 			  }
 			  if (tagName[0].equals("Î´·Öî"))
 			  {
@@ -308,6 +386,8 @@ public class HttpClient {
 			  
 			  
 		  }
+		  
+		  this.server.printAll();
 		  
 		  
 		  return Untagged;
@@ -624,18 +704,19 @@ public class HttpClient {
 							  + "FOREIGN KEY (A_ID) REFERENCES Auther(A_ID))" );
 					  stmt.executeUpdate( createTableIfNotExist
 							  +"Tag("
-							  + "T_ID INT , "
+							  + "T_ID INT  NOT NULL AUTO_INCREMENT, "
 							  + "PRIMARY KEY (T_ID), "
 							  + "T_NAME VARCHAR(255), "
-							  + "REG BOOLEAN)");
+							  + "REG BOOLEAN, "
+							  + "UNIQUE (T_NAME))");
 					  
 					  
 					  stmt.executeUpdate( createTableIfNotExist
 							  +"ImageTag("
 							  + "I_ID INT, "
 							  + " FOREIGN KEY(I_ID) REFERENCES Image(I_ID), "
-							  + "T_ID INT,"
-							  + " FOREIGN KEY (T_ID) REFERENCES Tag(T_ID))");
+							  + "T_NAME VARCHAR(255),"
+							  + " FOREIGN KEY (T_NAME) REFERENCES Tag(T_NAME))");
 				  
 			  }
 			  
@@ -650,7 +731,7 @@ public class HttpClient {
 			  return true;
 		  }
 		  /*********************
-		   * @AUTHERAUTHER: int A_ID, string name 
+		   * @AUTHER: int A_ID, string name 
 		   * @IMAGE: int I_ID, string name, int size, string location, int A_ID
 		   * @TAG: int T_ID, String T_NAME, bool REG
 		   * @IMAGETAG: int I_ID, int T_ID
@@ -723,7 +804,7 @@ public class HttpClient {
 						  inputsb.append(", ");
 					  }else
 					  {
-						  inputsb.append("TAG VALUES (");
+						  inputsb.append("TAG (T_NAME, REG) VALUES (");
 						  
 					  }
 					  if (ob instanceof String)
@@ -775,6 +856,19 @@ public class HttpClient {
 			  
 		  }
 		  
+		  /************
+		   * 
+		   * for debug
+		   * @throws Exception
+		   */
+		  private void dropAll() throws Exception
+		  {
+			  String cmd = "DROP ALL OBJECTS";
+			  stmt.executeUpdate(cmd);
+			  
+			  
+		  }
+		  
 		  
 		  /***
 		   * 
@@ -797,6 +891,8 @@ public class HttpClient {
 		   */
 		  private void printAll() throws Exception
 		  {
+			  	
+			  
 			  	System.out.println( "Table image" );
 			  	ResultSet rs = stmt.executeQuery("SELECT * FROM IMAGE");
 	            while( rs.next() )
@@ -862,7 +958,7 @@ public class HttpClient {
 	            	int Iid = rs.getInt("I_ID");
 	                System.out.print( Iid +" ");
 	            	
-	                int Tid = rs.getInt("T_ID");
+	                String Tid = rs.getString("T_NAME");
 	                System.out.println( Tid );
 	                
 	                
@@ -911,8 +1007,15 @@ public class HttpClient {
 				  return false;
 			  return true;
 		  }
-		  
-		  private boolean ifExistbyID(entryType table, int...ids) throws Exception
+		  /******
+		   * @auther: can have second arg (auther name)
+		   * @tag: must have second arg (T_NAME)
+		   * @param table
+		   * @param ids
+		   * @return
+		   * @throws Exception
+		   */
+		  private boolean ifExistbyID(entryType table, Object...ids) throws Exception
 		  {
 			  
 			  StringBuilder inputsb = new StringBuilder();
@@ -923,6 +1026,12 @@ public class HttpClient {
 			  case AUTHER:
 				  inputsb.append("AUTHER WHERE A_ID = ");
 				  inputsb.append(ids[0]);
+				  if(ids.length > 1)
+				  {
+					  inputsb.append("AND NAME = ");
+					  inputsb.append(String.format("'%s'", ids[1]));
+					  
+				  }
 				  break;
 				  
 			  case IMAGE:
@@ -938,8 +1047,8 @@ public class HttpClient {
 			  case IMAGETAG:
 				  inputsb.append("IMAGETAG WHERE I_ID = ");
 				  inputsb.append(ids[0]);
-				  inputsb.append("AND T_ID = ");
-				  inputsb.append(ids[1]);
+				  inputsb.append("AND T_NAME = ");
+				  inputsb.append(String.format("'%s'", ids[1]));
 				  break;
 				  
 				  
@@ -954,6 +1063,24 @@ public class HttpClient {
 			  return true;
 		  }
 		  
+		  
+		  
+		  private Object custumizedQuery(String cmd) throws Exception  
+		  {
+			  
+			  ResultSet rs =stmt.executeQuery(cmd);
+			  return rs;
+			  
+		  }
+		  
+		  private boolean custumizedQueryExist(String cmd) throws Exception
+		  {
+			  ResultSet rs =stmt.executeQuery(cmd);
+			  if (rs.next())
+				  return true;
+			  return false;
+			  
+		  }
 		  
 	  }
 	  
