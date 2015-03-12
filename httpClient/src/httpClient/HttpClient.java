@@ -68,6 +68,8 @@ public class HttpClient {
 		  http.server.dropAll();
 		  http.server.init();
 		  
+		  
+		  
 		  /*
 		  H2server server = http.new H2server();
 		  server.connect("~/test");
@@ -80,6 +82,8 @@ public class HttpClient {
 		  server.addEntry(entryType.AUTHER, 2, "authername");
 		  server.addEntry(entryType.IMAGE, 3, "imagename", -1, "location", 2);
 		  server.addEntry(entryType.IMAGETAG, 3, "tagname");
+		  
+		  server.updateEntry("AUTHER", "NAME", "NEWNAME", "WHERE", "A_ID", 2);
 		  server.printAll();
 		  
 		  System.out.println( server.ifExistbyName(entryType.AUTHER, "authername"));
@@ -119,7 +123,7 @@ public class HttpClient {
 	 * @throws Exception 
 	   ***********************/
 	  
-	  private List<String> prepareTag(Document doc) throws Exception
+	  private List<String> prepareTag(Document doc, String I_ID) throws Exception
 	  {
 		
 		  if (this.tags == null)
@@ -133,25 +137,57 @@ public class HttpClient {
 		  for (Element cloudTag : cloudTags)
 		  {
 			  String tagName = cloudTag.text();
+			  
+			  
+			  /******for test******/
+			  
+			  //tagName = "ABC\\DEF";
+			  /******for test******/
 			  tagName = tagName.replace("*", "");
 			  //System.out.println(tagName);
-			  if (this.tags.containsKey(tagName))
+			  String [] tagNames = new String[1];
+			  tagNames[0] = tagName;
+			  if (tagName.contains("\\"))
 			  {
-				  
-				  ret.add(tagName);
-				  this.tags.put(tagName, this.tags.get(tagName)-1);
-				  
+				  tagNames = tagName.split("\\");
 				  
 			  }
-			  
-			  if (!this.server.ifExistbyName(entryType.TAG, tagName))
+			  else if (tagName.contains("/"))
 			  {
-				  System.out.println("tag " + tagName + "not exist in database, adding...");
-				  this.server.addEntry(entryType.TAG, tagName, false );
 				  
+				  tagNames = tagName.split("/");
 				  
 			  }
-			  
+			  tagName = null;
+			  for (String tagName1: tagNames){
+				  if (this.tags.containsKey(tagName1))
+				  {
+					  
+					  ret.add(tagName1);
+					  this.tags.put(tagName1, this.tags.get(tagName1)+1);
+					  
+					  
+					  
+				  }
+				  
+				  if (!this.server.ifExistbyName(entryType.TAG, tagName1))
+				  {
+					  System.out.println("tag " + tagName1 + "not exist in database, adding...");
+					  
+					  try
+					  {
+						  this.server.addEntry(entryType.TAG, tagName1, false );
+					  }catch (Exception e)
+					  {
+						  System.out.println(e.getMessage());
+						  
+						  
+					  }
+					  
+				  }
+				  
+				  this.server.addEntry(entryType.IMAGETAG, Integer.parseInt(I_ID), tagName1);
+			  }
 		  }
 		  
 		  return ret;
@@ -219,11 +255,12 @@ public class HttpClient {
 			return result.toString();
 	  }
 	  /*********
-	   * analyze the doc and add the auther if not exist
+	   * analyze the doc and add the author if not exist
 	   * @param doc
+	   * @return A_ID in string format
 	 * @throws Exception 
 	   */
-	  private void addAuthor(String id) throws Exception
+	  private String addAuthor(String id) throws Exception
 	  {
 		  String link = "http://www.pixiv.net/member_illust.php?mode=medium&illust_id=" + id;
 		  String html = this.GetPageContent(link);
@@ -254,12 +291,37 @@ public class HttpClient {
 		  else if (!this.server.ifExistbyID(entryType.AUTHER, ID, autherName))
 		  {
 			  
-			  //TODO
-			  System.out.println("author name change, need to implement update function");
+			  this.server.updateEntry("AUTHER", "NAME", autherName,
+					  "WHERE", "A_ID", ID);
 			  
 		  }
 		  
+		  return ID;
 		  
+	  }
+	  
+	  
+	  private void addImage(String I_ID, String A_ID, Document doc) throws Exception
+	  {
+		  //System.out.println(doc);
+		  Elements titleContainer = doc.select("div.layout-body");
+		  Elements titleElements = titleContainer.select("h1.title");
+		  Element titleElement = titleElements.first();
+		  String title = titleElement.text();
+		  
+		  if (!this.server.ifExistbyID(entryType.IMAGE, I_ID))
+		  {
+			  this.server.addEntry(entryType.IMAGE, I_ID, title, -1, "", A_ID);
+			  
+		  }
+		  else 
+		  {
+			  //Image name cannot change
+			  return;
+			  //this.server.updateEntry("IMAGE", "NAME", title,
+				//	  "WHERE", "I_ID", I_ID);
+			  
+		  }
 		  
 	  }
 	  
@@ -271,7 +333,7 @@ public class HttpClient {
 	  private void procTag(int untagged) throws Exception {
 		  
 		  
-		  int lastPage = (int)Math.floor(untagged/20.0);
+		  int lastPage = (int)Math.ceil(untagged/20.0);
 		  String untaggedUrl = "http://www.pixiv.net/bookmark.php?tag=%E6%9C%AA%E5%88%86%E9%A1%9E&p="+ lastPage;
 		  System.out.println("untagged = " + untagged);
 		  System.out.println("lastPage = " + lastPage);
@@ -309,11 +371,12 @@ public class HttpClient {
 				  String ID = makeMatch.group();
 				  System.out.println(ID);
 				  
-				  addAuthor(ID);
+				  String A_ID = addAuthor(ID);
+				  
+				  addImage(ID, A_ID, docF);
 				  
 				  
-				  
-				  List<String> curTags = this.prepareTag(docF);
+				  List<String> curTags = this.prepareTag(docF, ID);
 				  
 				  if(curTags.isEmpty())
 					  continue;
@@ -627,7 +690,12 @@ public class HttpClient {
 		System.out.println(cookies);
 	  }
 	  
-	  
+	  /***************
+	   * H2server has no protection for injection
+	   * it's not necessary here I believe...
+	   * @author lhcst_000
+	   *
+	   */
 	  private class H2server
 	  {
 		  
@@ -734,7 +802,7 @@ public class HttpClient {
 		   * @AUTHER: int A_ID, string name 
 		   * @IMAGE: int I_ID, string name, int size, string location, int A_ID
 		   * @TAG: int T_ID, String T_NAME, bool REG
-		   * @IMAGETAG: int I_ID, int T_ID
+		   * @IMAGETAG: int I_ID, String T_NAME
 		   * 
 		   */
 		  private void addEntry (entryType nameOfTable, Object...obs) throws Exception
@@ -855,6 +923,58 @@ public class HttpClient {
 			  stmt.executeUpdate(command);
 			  
 		  }
+		  
+		  /*********************
+		   * @AUTHER: int A_ID, string name 
+		   * @IMAGE: int I_ID, string name, int size, string location, int A_ID
+		   * @TAG: int T_ID, String T_NAME, bool REG
+		   * @IMAGETAG: int I_ID, int T_ID
+		   * format: updateEntry("AUTHER", "NAME", "NEWNAME", "WHERE", "A_ID", 2);
+		   */
+		  
+		  private void updateEntry(Object...obs) throws Exception
+		  {
+			  
+			  StringBuilder inputsb = new StringBuilder();
+			  inputsb.append("UPDATE ");
+			  inputsb.append(obs[0]);
+			  inputsb.append(" SET ");
+			  int i = 1;
+			  while (i+	1 < obs.length)
+			  {
+				  if (obs[i] == "WHERE")
+				  {
+					  inputsb.setLength(inputsb.length()-2);
+					  inputsb.append(" WHERE ");
+					  i++;
+					  
+				  }
+				  inputsb.append(obs[i] + "=");
+				  if (obs[i+1] instanceof String)
+				  {
+					  inputsb.append(String.format("'%s'", obs[i+1]));
+					  
+				  }else
+				  inputsb.append(obs[i+1]);
+				  i = i+2;
+				  
+				  if (i < obs.length)
+				  {
+					  
+					  inputsb.append(", ");
+					  
+				  }else
+					  inputsb.append(";");
+			  }
+			  
+			  
+			  String command = inputsb.toString();
+			  System.out.println(command);
+			  stmt.executeUpdate(command);
+			  
+			  
+		  }
+		  
 		  
 		  /************
 		   * 
